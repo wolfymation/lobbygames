@@ -1,0 +1,7 @@
+cookie-clicker:
+  world: world
+  x: 63
+  y: -59
+  z: 216
+cookie-reset:
+  next-reset-at: 0

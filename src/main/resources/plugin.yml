@@ -1,0 +1,17 @@
+name: lobbygames
+version: '${version}'
+
+main: me.colinstudios.lobbygames.Lobbygames
+api-version: '1.21.11'
+load: POSTWORLD
+softdepend:
+  - PlaceholderAPI
+commands:
+  cookieadmin:
+    description: CookieClicker Admin-Verwaltung
+    usage: /cookieadmin <setclicker|setresetinfo|setshop|info|set|add|remove|reset|specialitem|reloadhologram|reloadleaderboard|setplaceone...setplaceten>
+    permission: lobbygames.cookieadmin
+permissions:
+  lobbygames.cookieadmin:
+    description: Erlaubt die Verwaltung des CookieClickers
+    default: op
