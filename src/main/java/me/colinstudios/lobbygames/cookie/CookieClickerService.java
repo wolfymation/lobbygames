@@ -9,8 +9,10 @@ import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.Sign;
 import org.bukkit.block.Skull;
+import org.bukkit.block.data.Directional;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
@@ -204,12 +206,17 @@ public final class CookieClickerService {
     }
 
     public void setLeaderboardLocation(int rank, String type, Location location) {
+        setLeaderboardLocation(rank, type, location, null);
+    }
+
+    public void setLeaderboardLocation(int rank, String type, Location location, BlockFace facing) {
         FileConfiguration config = plugin.getConfig();
         String path = "cookie-leaderboard." + rank + "." + type;
         config.set(path + ".world", location.getWorld().getName());
         config.set(path + ".x", location.getBlockX());
         config.set(path + ".y", location.getBlockY());
         config.set(path + ".z", location.getBlockZ());
+        config.set(path + ".facing", facing == null ? null : facing.name().toLowerCase(Locale.ROOT));
         plugin.saveConfig();
         updateLeaderboard();
     }
@@ -272,6 +279,22 @@ public final class CookieClickerService {
             return null;
         }
         return new Location(world, config.getInt(path + ".x"), config.getInt(path + ".y"), config.getInt(path + ".z"));
+    }
+
+    public BlockFace getLeaderboardFacing(int rank, String type) {
+        FileConfiguration config = plugin.getConfig();
+        String path = "cookie-leaderboard." + rank + "." + type + ".facing";
+        String value = config.getString(path);
+        if (value == null) {
+            return null;
+        }
+        return switch (value.toLowerCase(Locale.ROOT)) {
+            case "north" -> BlockFace.NORTH;
+            case "east" -> BlockFace.EAST;
+            case "south" -> BlockFace.SOUTH;
+            case "west" -> BlockFace.WEST;
+            default -> null;
+        };
     }
 
     public void spawnOrRefreshHologram() {
@@ -442,12 +465,15 @@ public final class CookieClickerService {
             return;
         }
         Block block = location.getBlock();
+        BlockFace facing = getLeaderboardFacing(rank, "head");
         if (entry == null) {
-            block.setType(Material.SKELETON_SKULL);
+            block.setType(facing == null ? Material.SKELETON_SKULL : Material.SKELETON_WALL_SKULL);
+            applyFacing(block, facing);
             return;
         }
 
-        block.setType(Material.PLAYER_HEAD);
+        block.setType(facing == null ? Material.PLAYER_HEAD : Material.PLAYER_WALL_HEAD);
+        applyFacing(block, facing);
         if (block.getState() instanceof Skull skull) {
             skull.setOwningPlayer(Bukkit.getOfflinePlayer(entry.uuid()));
             skull.update(true, false);
@@ -460,23 +486,43 @@ public final class CookieClickerService {
             return;
         }
         Block block = location.getBlock();
-        if (!(block.getState() instanceof Sign)) {
-            block.setType(Material.OAK_SIGN);
+        BlockFace facing = getLeaderboardFacing(rank, "sign");
+        if (!(block.getState() instanceof Sign) || (facing != null && !(block.getBlockData() instanceof Directional))) {
+            block.setType(facing == null ? Material.OAK_SIGN : Material.OAK_WALL_SIGN);
         }
+        applyFacing(block, facing);
         if (block.getState() instanceof Sign sign) {
             if (entry == null) {
-                sign.line(0, Component.text("#" + rank, NamedTextColor.GOLD));
+                sign.line(0, Component.text("Platz " + rank, rankColor(rank)));
                 sign.line(1, Component.text("Leer", NamedTextColor.GRAY));
-                sign.line(2, Component.text("0 Cookies", NamedTextColor.YELLOW));
-                sign.line(3, Component.empty());
+                sign.line(2, Component.text("0", NamedTextColor.GOLD));
+                sign.line(3, Component.text("0 pro Klick", NamedTextColor.GRAY));
             } else {
-                sign.line(0, Component.text("#" + rank + " Cookies", NamedTextColor.GOLD));
-                sign.line(1, Component.text(entry.name(), NamedTextColor.DARK_BLUE));
-                sign.line(2, Component.text(format(entry.cookies()), NamedTextColor.DARK_RED));
-                sign.line(3, Component.text("Cookies", NamedTextColor.DARK_GRAY));
+                CookieAccount account = storage.getAccount(Bukkit.getOfflinePlayer(entry.uuid()));
+                sign.line(0, Component.text("Platz " + rank, rankColor(rank)));
+                sign.line(1, Component.text(entry.name(), NamedTextColor.WHITE).decorate(net.kyori.adventure.text.format.TextDecoration.BOLD));
+                sign.line(2, Component.text(format(entry.cookies()), NamedTextColor.GOLD));
+                sign.line(3, Component.text(format(account.cookiesPerClick()) + " pro Klick", NamedTextColor.GRAY));
             }
             sign.update(true, false);
         }
+    }
+
+    private NamedTextColor rankColor(int rank) {
+        return switch (rank) {
+            case 1 -> NamedTextColor.GOLD;
+            case 2 -> NamedTextColor.GRAY;
+            case 3 -> NamedTextColor.RED;
+            default -> NamedTextColor.GRAY;
+        };
+    }
+
+    private void applyFacing(Block block, BlockFace facing) {
+        if (facing == null || !(block.getBlockData() instanceof Directional directional)) {
+            return;
+        }
+        directional.setFacing(facing);
+        block.setBlockData(directional, false);
     }
 
     private void playClickEffects(org.bukkit.entity.Player player, boolean critical) {

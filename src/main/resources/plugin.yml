@@ -7,9 +7,9 @@ load: POSTWORLD
 softdepend:
   - PlaceholderAPI
 commands:
-  cookieadmin:
+  cookie:
     description: CookieClicker Admin-Verwaltung
-    usage: /cookieadmin <setclicker|setresetinfo|setshop|info|set|add|remove|reset|specialitem|reloadhologram|reloadleaderboard|setplaceone...setplaceten>
+    usage: /cookie admin <set|info|add|remove|reset|specialitem|reloadhologram|reloadleaderboard>
     permission: lobbygames.cookieadmin
 permissions:
   lobbygames.cookieadmin:

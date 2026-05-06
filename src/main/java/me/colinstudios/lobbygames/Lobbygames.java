@@ -28,8 +28,8 @@ public final class Lobbygames extends JavaPlugin {
         getServer().getPluginManager().registerEvents(listener, this);
 
         CookieAdminCommand adminCommand = new CookieAdminCommand(this, cookieClickerService, cookieStorage, cookieSpecialItemService);
-        getCommand("cookieadmin").setExecutor(adminCommand);
-        getCommand("cookieadmin").setTabCompleter(adminCommand);
+        getCommand("cookie").setExecutor(adminCommand);
+        getCommand("cookie").setTabCompleter(adminCommand);
 
         if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
             new CookiePlaceholderExpansion(this, cookieClickerService).register();
