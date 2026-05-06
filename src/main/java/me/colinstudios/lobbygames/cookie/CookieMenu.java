@@ -103,16 +103,16 @@ public final class CookieMenu {
             : line("Kosten: ", service.format(cost) + " Cookies", affordable ? NamedTextColor.GREEN : NamedTextColor.RED));
         lore.add(Component.empty());
         switch (upgrade) {
-            case CLICK_POWER -> lore.add(line("Effekt: ", "+1 Basis-Cookie pro Hau", NamedTextColor.YELLOW));
-            case AUTO_CLICKER -> lore.add(line("Effekt: ", "+1 Basis-Cookie pro Sekunde", NamedTextColor.AQUA));
-            case OVEN -> lore.add(line("Effekt: ", "+1x Multiplikator fuer Hau und Auto", NamedTextColor.GOLD));
+            case CLICK_POWER -> lore.add(line("Effekt: ", "ca. +0,4 Basis-Cookies pro Hau", NamedTextColor.YELLOW));
+            case AUTO_CLICKER -> lore.add(line("Effekt: ", "ca. +0,4 Basis-Cookies pro Sekunde", NamedTextColor.AQUA));
+            case OVEN -> lore.add(line("Effekt: ", "ca. +0,4x Multiplikator für Hau und Auto", NamedTextColor.GOLD));
             case FORTUNE -> {
-                lore.add(line("Effekt: ", "+5% Chance auf doppelten Hau", NamedTextColor.LIGHT_PURPLE));
-                lore.add(line("Aktuell: ", account.criticalChancePercent() + "% / 35%", NamedTextColor.LIGHT_PURPLE));
+                lore.add(line("Effekt: ", "+2% Chance auf doppelten Hau", NamedTextColor.LIGHT_PURPLE));
+                lore.add(line("Aktuell: ", account.criticalChancePercent() + "% / 14%", NamedTextColor.LIGHT_PURPLE));
             }
             case DISCOUNT -> {
-                lore.add(line("Effekt: ", "+3% Rabatt auf alle Upgrades", NamedTextColor.GREEN));
-                lore.add(line("Aktuell: ", account.discountPercent() + "% / 30%", NamedTextColor.GREEN));
+                lore.add(line("Effekt: ", "+1% Rabatt auf alle Upgrades", NamedTextColor.GREEN));
+                lore.add(line("Aktuell: ", account.discountPercent() + "% / 12%", NamedTextColor.GREEN));
             }
         }
         lore.add(Component.empty());

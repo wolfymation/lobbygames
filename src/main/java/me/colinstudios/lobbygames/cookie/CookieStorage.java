@@ -1,6 +1,7 @@
 package me.colinstudios.lobbygames.cookie;
 
 import org.bukkit.OfflinePlayer;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
@@ -10,10 +11,11 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.HashMap;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
-import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 public final class CookieStorage {
@@ -79,31 +81,6 @@ public final class CookieStorage {
         return new CookieAccount(0L, 0, 0, 0, 0, 0);
     }
 
-    public synchronized Map<UUID, CookieAccount> getAutoClickerAccounts() {
-        Map<UUID, CookieAccount> accounts = new HashMap<>();
-        try (PreparedStatement statement = connection.prepareStatement(
-            "SELECT uuid, cookies, click_power_level, auto_clicker_level, oven_level, fortune_level, discount_level FROM cookie_accounts WHERE auto_clicker_level > 0"
-        );
-             ResultSet result = statement.executeQuery()) {
-            while (result.next()) {
-                accounts.put(
-                    UUID.fromString(result.getString("uuid")),
-                    new CookieAccount(
-                        result.getLong("cookies"),
-                        result.getInt("click_power_level"),
-                        result.getInt("auto_clicker_level"),
-                        result.getInt("oven_level"),
-                        result.getInt("fortune_level"),
-                        result.getInt("discount_level")
-                    )
-                );
-            }
-        } catch (SQLException exception) {
-            throw new IllegalStateException("Could not load auto clicker accounts", exception);
-        }
-        return accounts;
-    }
-
     public synchronized long getTotalCookies() {
         try (PreparedStatement statement = connection.prepareStatement("SELECT COALESCE(sum(cookies), 0) AS total FROM cookie_accounts");
              ResultSet result = statement.executeQuery()) {
@@ -158,31 +135,31 @@ public final class CookieStorage {
         }
     }
 
-    public synchronized void addCookies(UUID uuid, long amount) {
-        try (PreparedStatement statement = connection.prepareStatement("""
-            UPDATE cookie_accounts
-            SET cookies = min(?, max(0, cookies + ?)), updated_at = ?
-            WHERE uuid = ?
-            """)) {
-            statement.setLong(1, CookieClickerService.MAX_COOKIES);
-            statement.setLong(2, amount);
-            statement.setLong(3, System.currentTimeMillis());
-            statement.setString(4, uuid.toString());
-            statement.executeUpdate();
-        } catch (SQLException exception) {
-            throw new IllegalStateException("Could not add automatic cookies", exception);
+    public synchronized Set<UUID> addOnlineAutoClickerCookies(Collection<? extends Player> players) {
+        Set<UUID> updatedPlayers = new HashSet<>();
+        if (players.isEmpty()) {
+            return updatedPlayers;
         }
-    }
 
-    public synchronized int addAutoClickerCookies() {
         try (PreparedStatement statement = connection.prepareStatement("""
             UPDATE cookie_accounts
-            SET cookies = min(?, cookies + (auto_clicker_level * (1 + oven_level))), updated_at = ?
-            WHERE auto_clicker_level > 0
+            SET cookies = min(?, cookies + (
+                CAST(CASE WHEN auto_clicker_level <= 0 THEN 0 ELSE max(1, round(auto_clicker_level * 0.4)) END AS INTEGER)
+                * (1 + CAST(CASE WHEN oven_level <= 0 THEN 0 ELSE max(1, round(oven_level * 0.4)) END AS INTEGER))
+            )), name = ?, updated_at = ?
+            WHERE uuid = ? AND auto_clicker_level > 0
             """)) {
-            statement.setLong(1, CookieClickerService.MAX_COOKIES);
-            statement.setLong(2, System.currentTimeMillis());
-            return statement.executeUpdate();
+            long now = System.currentTimeMillis();
+            for (Player player : players) {
+                statement.setLong(1, CookieClickerService.MAX_COOKIES);
+                statement.setString(2, player.getName());
+                statement.setLong(3, now);
+                statement.setString(4, player.getUniqueId().toString());
+                if (statement.executeUpdate() > 0) {
+                    updatedPlayers.add(player.getUniqueId());
+                }
+            }
+            return updatedPlayers;
         } catch (SQLException exception) {
             throw new IllegalStateException("Could not add automatic cookies", exception);
         }

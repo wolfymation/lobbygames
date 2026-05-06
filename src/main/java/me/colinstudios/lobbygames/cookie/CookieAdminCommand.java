@@ -19,7 +19,7 @@ import java.util.List;
 
 public final class CookieAdminCommand implements CommandExecutor, TabCompleter {
     private static final List<String> ADMIN_COMMANDS = List.of(
-        "set", "info", "add", "remove", "reset", "specialitem", "reloadhologram", "reloadleaderboard"
+        "set", "info", "add", "remove", "reset", "specialitem", "anticheat", "reloadhologram", "reloadleaderboard"
     );
     private static final List<String> SET_COMMANDS = List.of("clicker", "resetinfo", "shop", "place", "cookies");
     private static final List<String> PLACE_TYPES = List.of("head", "sign");
@@ -61,6 +61,7 @@ public final class CookieAdminCommand implements CommandExecutor, TabCompleter {
             case "remove" -> updateCookies(sender, args, UpdateMode.REMOVE, 2, "/cookie admin remove <spieler> <anzahl>");
             case "reset" -> reset(sender, args);
             case "specialitem" -> giveSpecialItem(sender, args);
+            case "anticheat" -> antiCheat(sender, args);
             case "reloadhologram" -> {
                 service.spawnOrRefreshHologram();
                 sender.sendMessage(Component.text("Cookie-Hologramm neu geladen."));
@@ -243,9 +244,21 @@ public final class CookieAdminCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(Component.text("/cookie admin add|remove <spieler> <anzahl>"));
         sender.sendMessage(Component.text("/cookie admin reset <spieler>"));
         sender.sendMessage(Component.text("/cookie admin specialitem <item> <spieler>"));
+        sender.sendMessage(Component.text("/cookie admin anticheat scan <spieler>"));
         sender.sendMessage(Component.text("/cookie admin reloadhologram"));
         sender.sendMessage(Component.text("/cookie admin reloadleaderboard"));
         sender.sendMessage(Component.text("Aktueller Block: " + (location == null ? "ungueltig" : formatLocation(location))));
+    }
+
+    private void antiCheat(CommandSender sender, String[] args) {
+        if (args.length < 4 || !args[2].equalsIgnoreCase("scan")) {
+            sender.sendMessage(Component.text("Nutzung: /cookie admin anticheat scan <spieler>"));
+            return;
+        }
+        OfflinePlayer target = Bukkit.getOfflinePlayer(args[3]);
+        for (String line : service.getAntiCheatScanLines(target)) {
+            sender.sendMessage(Component.text(line));
+        }
     }
 
     private void sendSetUsage(CommandSender sender) {
@@ -324,6 +337,12 @@ public final class CookieAdminCommand implements CommandExecutor, TabCompleter {
         }
         if (args.length == 4 && args[1].equalsIgnoreCase("specialitem")) {
             return filter(Bukkit.getOnlinePlayers().stream().map(Player::getName).toList(), args[3]);
+        }
+        if (args.length == 3 && args[1].equalsIgnoreCase("anticheat")) {
+            return filter(List.of("scan"), args[2]);
+        }
+        if (args.length == 4 && args[1].equalsIgnoreCase("anticheat") && args[2].equalsIgnoreCase("scan")) {
+            return filter(Arrays.stream(Bukkit.getOfflinePlayers()).map(OfflinePlayer::getName).toList(), args[3]);
         }
         if (args.length == 4 && List.of("add", "remove").contains(args[1].toLowerCase(LocaleRoot.VALUE))) {
             return filter(List.of("1", "10", "100", "1000"), args[3]);

@@ -30,16 +30,12 @@ public final class CookieShopMenu {
         Inventory inventory = org.bukkit.Bukkit.createInventory(holder, 27, Component.text(TITLE, NamedTextColor.GOLD));
         holder.setInventory(inventory);
 
-        ItemStack glass = item(Material.BLACK_STAINED_GLASS_PANE, " ", List.of(), false);
-        for (int slot = 0; slot < inventory.getSize(); slot++) {
-            inventory.setItem(slot, glass);
-        }
-
         inventory.setItem(SPECIAL_TNT_SLOT, item(
             Material.TNT,
-            "Special TNT",
+            "Cookie TNT",
             List.of(
                 line("Kosten: ", service.format(CookieClickerService.SPECIAL_TNT_COST) + " Cookies", tntAffordable ? NamedTextColor.GREEN : NamedTextColor.RED),
+                Component.text("Kann ueberall ausgeloest werden.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
                 Component.text("Explodiert ohne Blockschaden.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
                 Component.text("Schleudert Spieler weg.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
                 Component.empty(),
@@ -53,8 +49,8 @@ public final class CookieShopMenu {
             "Cookie Regen",
             List.of(
                 line("Kosten: ", service.format(CookieClickerService.COOKIE_RAIN_COST) + " Cookies", rainAffordable ? NamedTextColor.GREEN : NamedTextColor.RED),
-                Component.text("Laesst Cookies um dich regnen.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
-                Component.text("Kosmetischer Effekt ohne Exploit-Gewinn.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                Component.text("Laesst 6 Sekunden Cookies regnen.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                Component.text("Nur Effekt, keine aufhebbaren Items.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
                 Component.empty(),
                 Component.text(rainAffordable ? "Bereit zum Kaufen" : "Nicht genug Cookies", rainAffordable ? NamedTextColor.GREEN : NamedTextColor.RED).decoration(TextDecoration.ITALIC, false)
             ),
@@ -66,8 +62,8 @@ public final class CookieShopMenu {
             "Farb-Schneeball",
             List.of(
                 line("Kosten: ", service.format(CookieClickerService.COLOR_SNOWBALL_COST) + " Cookies", snowballAffordable ? NamedTextColor.GREEN : NamedTextColor.RED),
-                Component.text("Faerbt Bloecke im Radius 10 temporaer.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
-                Component.text("Container, Heads und Schutzbloecke bleiben sicher.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                Component.text("Kann ohne Baurechte geworfen werden.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                Component.text("Faerbt Bloecke im Radius 10 kurz ein.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
                 Component.empty(),
                 Component.text(snowballAffordable ? "Bereit zum Kaufen" : "Nicht genug Cookies", snowballAffordable ? NamedTextColor.GREEN : NamedTextColor.RED).decoration(TextDecoration.ITALIC, false)
             ),
@@ -77,26 +73,26 @@ public final class CookieShopMenu {
         return inventory;
     }
 
-    public static boolean isCookieShop(Inventory inventory) {
-        return inventory != null && inventory.getHolder(false) instanceof CookieShopMenuHolder;
-    }
-
     private static Component line(String label, String value, NamedTextColor valueColor) {
         return Component.text(label, NamedTextColor.GRAY)
             .append(Component.text(value, valueColor))
             .decoration(TextDecoration.ITALIC, false);
     }
 
-    private static ItemStack item(Material material, String name, List<Component> lore, boolean glow) {
+    private static ItemStack item(Material material, String name, List<Component> lore, boolean enchanted) {
         ItemStack stack = new ItemStack(material);
         ItemMeta meta = stack.getItemMeta();
         meta.displayName(Component.text(name, NamedTextColor.GOLD).decoration(TextDecoration.ITALIC, false));
         meta.lore(lore);
-        meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ENCHANTS);
-        if (glow) {
+        meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
+        if (enchanted) {
             meta.setEnchantmentGlintOverride(true);
         }
         stack.setItemMeta(meta);
         return stack;
+    }
+
+    public static boolean isCookieShop(Inventory inventory) {
+        return inventory != null && inventory.getHolder(false) instanceof CookieShopMenuHolder;
     }
 }

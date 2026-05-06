@@ -27,12 +27,16 @@ import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.time.format.DateTimeFormatter;
 
 public final class CookieClickerService {
     public static final String GUI_TITLE = "Cookie Upgrades";
@@ -45,18 +49,38 @@ public final class CookieClickerService {
     private static final String HOLOGRAM_TAG = "lobbygames_cookie_clicker_hologram";
     private static final String RESET_INFO_TAG = "lobbygames_cookie_reset_info";
     private static final String SHOP_TAG = "lobbygames_cookie_shop";
+    private static final long STILL_CLICK_LIMIT_MILLIS = 10_000L;
+    private static final double MIN_MOVEMENT_DISTANCE_SQUARED = 0.04D;
+    private static final long CLICK_RATE_WINDOW_MILLIS = 1_000L;
+    private static final int CLICK_RATE_LIMIT = 12;
+    private static final long CLICK_SLOWDOWN_MILLIS = 2_000L;
+    private static final int ANTICHEAT_NOTIFY_THRESHOLD = 3;
+    private static final long ANTICHEAT_REPEAT_WINDOW_MILLIS = 60_000L;
+    private static final long ANTICHEAT_NOTIFY_COOLDOWN_MILLIS = 30_000L;
+    private static final long ANTICHEAT_LOG_COOLDOWN_MILLIS = 2_000L;
+    private static final int ANTICHEAT_MAX_LOG_ENTRIES = 50;
+    private static final DateTimeFormatter ANTICHEAT_TIME_FORMAT = DateTimeFormatter.ofPattern("dd.MM. HH:mm:ss");
 
     private final JavaPlugin plugin;
     private final CookieStorage storage;
     private final NumberFormat numberFormat = NumberFormat.getIntegerInstance(Locale.GERMANY);
     private final Random random = new Random();
     private final Map<UUID, TextDisplay> playerHolograms = new HashMap<>();
+    private final Map<UUID, Long> lastMovementAt = new HashMap<>();
+    private final Map<UUID, Location> lastMovementLocation = new HashMap<>();
+    private final Map<UUID, Deque<Long>> recentCookieClicks = new HashMap<>();
+    private final Map<UUID, Long> clickSlowdownUntil = new HashMap<>();
+    private final Map<UUID, Deque<AntiCheatLogEntry>> antiCheatLogs = new HashMap<>();
+    private final Map<String, Deque<Long>> recentAntiCheatDetections = new HashMap<>();
+    private final Map<String, Long> antiCheatNotificationCooldownUntil = new HashMap<>();
+    private final Map<String, Long> antiCheatLogCooldownUntil = new HashMap<>();
     private TextDisplay resetInfoDisplay;
     private TextDisplay shopDisplay;
     private BukkitTask hologramTask;
     private BukkitTask autoClickerTask;
     private BukkitTask leaderboardTask;
     private BukkitTask resetTask;
+    private long nextAuxiliaryDisplayCleanupAt;
 
     public CookieClickerService(JavaPlugin plugin, CookieStorage storage) {
         this.plugin = plugin;
@@ -65,6 +89,9 @@ public final class CookieClickerService {
 
     public void start() {
         ensureDefaultConfig();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            registerPlayerActivity(player);
+        }
         spawnOrRefreshHologram();
         hologramTask = Bukkit.getScheduler().runTaskTimer(plugin, (Runnable) this::updateHologramText, 20L * 5L, 20L * 5L);
         autoClickerTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickAutoClickers, 20L, 20L);
@@ -88,12 +115,22 @@ public final class CookieClickerService {
             resetTask.cancel();
         }
         removePlayerHolograms();
+        lastMovementAt.clear();
+        lastMovementLocation.clear();
+        recentCookieClicks.clear();
+        clickSlowdownUntil.clear();
+        antiCheatLogs.clear();
+        recentAntiCheatDetections.clear();
+        antiCheatNotificationCooldownUntil.clear();
+        antiCheatLogCooldownUntil.clear();
         if (resetInfoDisplay != null && !resetInfoDisplay.isDead()) {
             resetInfoDisplay.remove();
         }
         if (shopDisplay != null && !shopDisplay.isDead()) {
             shopDisplay.remove();
         }
+        removeOldResetInfoDisplays(getResetInfoLocation());
+        removeOldShopDisplays(getShopLocation());
     }
 
     public boolean isClickerBlock(Block block) {
@@ -134,8 +171,83 @@ public final class CookieClickerService {
         long earned = account.cookiesPerClick() * (critical ? 2L : 1L);
         long total = storage.addCookies(player, earned);
         playClickEffects(player, critical);
-        updateHologramText();
+        updateHologramText(player);
         return new CookieClickResult(earned, total, critical);
+    }
+
+    public Component getCookieClickBlockReason(Player player) {
+        long now = System.currentTimeMillis();
+        UUID playerId = player.getUniqueId();
+
+        Long lastMoveAt = lastMovementAt.computeIfAbsent(playerId, ignored -> now);
+        if (now - lastMoveAt >= STILL_CLICK_LIMIT_MILLIS) {
+            recentCookieClicks.remove(playerId);
+            recordAntiCheatDetection(player, "AFK_FARMING", "Cookie-Klicks nach " + ((now - lastMoveAt) / 1000L) + "s ohne Bewegung blockiert.", now);
+            return Component.text("Bewege dich kurz, um weiter Cookies zu sammeln.", NamedTextColor.RED);
+        }
+
+        Long slowdownUntil = clickSlowdownUntil.get(playerId);
+        if (slowdownUntil != null) {
+            long remaining = slowdownUntil - now;
+            if (remaining > 0L) {
+                long remainingSeconds = Math.max(1L, (long) Math.ceil(remaining / 1000.0D));
+                return Component.text("Du klickst zu schnell. Warte " + remainingSeconds + "s.", NamedTextColor.RED);
+            }
+            clickSlowdownUntil.remove(playerId);
+        }
+
+        Deque<Long> clicks = recentCookieClicks.computeIfAbsent(playerId, ignored -> new ArrayDeque<>());
+        removeOldClicks(clicks, now);
+        clicks.addLast(now);
+        if (clicks.size() > CLICK_RATE_LIMIT) {
+            clicks.clear();
+            clickSlowdownUntil.put(playerId, now + CLICK_SLOWDOWN_MILLIS);
+            recordAntiCheatDetection(player, "AUTOCLICKER", "Mehr als " + CLICK_RATE_LIMIT + " Cookie-Klicks in " + CLICK_RATE_WINDOW_MILLIS + "ms erkannt.", now);
+            return Component.text("Autoclicker-Schutz: Du wurdest kurz gebremst.", NamedTextColor.RED);
+        }
+
+        return null;
+    }
+
+    public void registerPlayerActivity(Player player) {
+        lastMovementAt.put(player.getUniqueId(), System.currentTimeMillis());
+        lastMovementLocation.put(player.getUniqueId(), player.getLocation());
+    }
+
+    public void handlePlayerMove(Player player, Location from, Location to) {
+        if (to == null) {
+            return;
+        }
+        Location lastMovement = lastMovementLocation.get(player.getUniqueId());
+        if (lastMovement == null
+            || !lastMovement.getWorld().equals(to.getWorld())
+            || lastMovement.distanceSquared(to) >= MIN_MOVEMENT_DISTANCE_SQUARED) {
+            registerPlayerActivity(player);
+        }
+    }
+
+    public void forgetPlayer(Player player) {
+        UUID playerId = player.getUniqueId();
+        removePlayerHologram(player);
+        lastMovementAt.remove(playerId);
+        lastMovementLocation.remove(playerId);
+        recentCookieClicks.remove(playerId);
+        clickSlowdownUntil.remove(playerId);
+    }
+
+    public List<String> getAntiCheatScanLines(org.bukkit.OfflinePlayer player) {
+        Deque<AntiCheatLogEntry> entries = antiCheatLogs.get(player.getUniqueId());
+        if (entries == null || entries.isEmpty()) {
+            return List.of("Keine AntiCheat-Einträge für " + displayName(player) + ".");
+        }
+
+        List<String> lines = new ArrayList<>();
+        lines.add("AntiCheat-Einträge für " + displayName(player) + " (" + entries.size() + "):");
+        for (AntiCheatLogEntry entry : entries) {
+            String time = ANTICHEAT_TIME_FORMAT.format(ZonedDateTime.ofInstant(Instant.ofEpochMilli(entry.createdAtMillis()), ZoneId.systemDefault()));
+            lines.add(time + " | " + entry.type() + " | " + entry.details());
+        }
+        return lines;
     }
 
     public CookieAccount getAccount(org.bukkit.OfflinePlayer player) {
@@ -152,7 +264,7 @@ public final class CookieClickerService {
             playUpgradeEffects(player, upgrade);
             updateLeaderboard();
         }
-        updateHologramText();
+        updateHologramText(player);
         return bought;
     }
 
@@ -174,7 +286,7 @@ public final class CookieClickerService {
             return false;
         }
         storage.addCookies(player, -cost);
-        updateHologramText();
+        updateHologramText(player);
         updateLeaderboard();
         return true;
     }
@@ -428,22 +540,16 @@ public final class CookieClickerService {
     }
 
     private void tickAutoClickers() {
-        boolean changed = false;
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            CookieAccount account = storage.getAccount(player);
-            long cookiesPerSecond = account.cookiesPerSecond();
-            if (cookiesPerSecond <= 0) {
-                continue;
+        for (UUID playerId : storage.addOnlineAutoClickerCookies(Bukkit.getOnlinePlayers())) {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player != null) {
+                updateHologramText(player);
             }
-            storage.addCookies(player, cookiesPerSecond);
-            changed = true;
-        }
-        if (changed) {
-            updateHologramText();
         }
     }
 
     private void tickResetTimer() {
+        ensureAuxiliaryDisplays();
         ensureNextResetAt();
         long now = System.currentTimeMillis();
         long nextResetAt = plugin.getConfig().getLong("cookie-reset.next-reset-at");
@@ -451,7 +557,7 @@ public final class CookieClickerService {
             int resetAccounts = storage.resetAllAccounts();
             plugin.getConfig().set("cookie-reset.next-reset-at", nextScheduledResetAfter(now, nextResetAt));
             plugin.saveConfig();
-            Bukkit.broadcast(Component.text("CookieClicker wurde zurueckgesetzt. Neuer Wettbewerb gestartet.", NamedTextColor.GOLD));
+            Bukkit.broadcast(Component.text("CookieClicker wurde zurückgesetzt. Neuer Wettbewerb gestartet.", NamedTextColor.GOLD));
             plugin.getLogger().info("CookieClicker reset completed for " + resetAccounts + " accounts.");
             updateHologramText();
             updateLeaderboard();
@@ -465,13 +571,29 @@ public final class CookieClickerService {
         }
         ensureNextResetAt();
         long remaining = Math.max(0L, plugin.getConfig().getLong("cookie-reset.next-reset-at") - System.currentTimeMillis());
-        resetInfoDisplay.text(Component.text("Naechster Cookie-Reset", NamedTextColor.GOLD)
+        resetInfoDisplay.text(Component.text("Nächster Cookie-Reset", NamedTextColor.GOLD)
             .append(Component.newline())
             .append(Component.text(formatDuration(remaining), NamedTextColor.YELLOW))
             .append(Component.newline())
             .append(Component.text("Alle 3 Tage um 20:00 Uhr", NamedTextColor.GRAY))
             .append(Component.newline())
             .append(Component.text("Reset: Cookies & Upgrades", NamedTextColor.DARK_GREEN)));
+    }
+
+    private void ensureAuxiliaryDisplays() {
+        if (resetInfoDisplay == null || resetInfoDisplay.isDead()) {
+            spawnOrRefreshResetInfo();
+        }
+        if (shopDisplay == null || shopDisplay.isDead()) {
+            spawnOrRefreshShop();
+        }
+
+        long now = System.currentTimeMillis();
+        if (now >= nextAuxiliaryDisplayCleanupAt) {
+            nextAuxiliaryDisplayCleanupAt = now + 60_000L;
+            removeDuplicateResetInfoDisplays();
+            removeDuplicateShopDisplays();
+        }
     }
 
     public void updateLeaderboard() {
@@ -576,6 +698,9 @@ public final class CookieClickerService {
     }
 
     private void removeOldResetInfoDisplays(Location blockLocation) {
+        if (blockLocation == null || !blockLocation.isWorldLoaded()) {
+            return;
+        }
         for (Entity entity : blockLocation.getWorld().getNearbyEntities(blockLocation.toCenterLocation(), 3.0, 3.0, 3.0)) {
             if (entity.getScoreboardTags().contains(RESET_INFO_TAG)) {
                 entity.remove();
@@ -584,8 +709,30 @@ public final class CookieClickerService {
     }
 
     private void removeOldShopDisplays(Location blockLocation) {
+        if (blockLocation == null || !blockLocation.isWorldLoaded()) {
+            return;
+        }
         for (Entity entity : blockLocation.getWorld().getNearbyEntities(blockLocation.toCenterLocation(), 3.0, 3.0, 3.0)) {
             if (entity.getScoreboardTags().contains(SHOP_TAG)) {
+                entity.remove();
+            }
+        }
+    }
+
+    private void removeDuplicateResetInfoDisplays() {
+        removeDuplicateDisplays(getResetInfoLocation(), RESET_INFO_TAG, resetInfoDisplay);
+    }
+
+    private void removeDuplicateShopDisplays() {
+        removeDuplicateDisplays(getShopLocation(), SHOP_TAG, shopDisplay);
+    }
+
+    private void removeDuplicateDisplays(Location blockLocation, String tag, TextDisplay currentDisplay) {
+        if (blockLocation == null || !blockLocation.isWorldLoaded() || currentDisplay == null) {
+            return;
+        }
+        for (Entity entity : blockLocation.getWorld().getNearbyEntities(blockLocation.toCenterLocation(), 3.0, 3.0, 3.0)) {
+            if (!entity.getUniqueId().equals(currentDisplay.getUniqueId()) && entity.getScoreboardTags().contains(tag)) {
                 entity.remove();
             }
         }
@@ -661,11 +808,66 @@ public final class CookieClickerService {
         return minutes + "m " + seconds + "s";
     }
 
+    private void removeOldClicks(Deque<Long> clicks, long now) {
+        while (!clicks.isEmpty() && now - clicks.peekFirst() > CLICK_RATE_WINDOW_MILLIS) {
+            clicks.removeFirst();
+        }
+    }
+
+    private void recordAntiCheatDetection(Player player, String type, String details, long now) {
+        String key = player.getUniqueId() + ":" + type;
+        Long nextLogAt = antiCheatLogCooldownUntil.get(key);
+        if (nextLogAt != null && now < nextLogAt) {
+            return;
+        }
+        antiCheatLogCooldownUntil.put(key, now + ANTICHEAT_LOG_COOLDOWN_MILLIS);
+
+        Deque<AntiCheatLogEntry> log = antiCheatLogs.computeIfAbsent(player.getUniqueId(), ignored -> new ArrayDeque<>());
+        log.addLast(new AntiCheatLogEntry(now, type, details));
+        while (log.size() > ANTICHEAT_MAX_LOG_ENTRIES) {
+            log.removeFirst();
+        }
+
+        Deque<Long> detections = recentAntiCheatDetections.computeIfAbsent(key, ignored -> new ArrayDeque<>());
+        while (!detections.isEmpty() && now - detections.peekFirst() > ANTICHEAT_REPEAT_WINDOW_MILLIS) {
+            detections.removeFirst();
+        }
+        detections.addLast(now);
+        if (detections.size() >= ANTICHEAT_NOTIFY_THRESHOLD) {
+            notifyAntiCheatRepeated(player, type, details, detections.size(), now);
+        }
+    }
+
+    private void notifyAntiCheatRepeated(Player player, String type, String details, int detections, long now) {
+        String key = player.getUniqueId() + ":" + type;
+        Long cooldownUntil = antiCheatNotificationCooldownUntil.get(key);
+        if (cooldownUntil != null && now < cooldownUntil) {
+            return;
+        }
+        antiCheatNotificationCooldownUntil.put(key, now + ANTICHEAT_NOTIFY_COOLDOWN_MILLIS);
+
+        String message = "[CookieAntiCheat] " + player.getName() + " mehrfach erkannt: " + type + " (" + detections + "x/60s). " + details;
+        plugin.getLogger().warning(message);
+        Component adminMessage = Component.text(message, NamedTextColor.RED);
+        for (Player admin : Bukkit.getOnlinePlayers()) {
+            if (admin.hasPermission("lobbygames.cookieadmin")) {
+                admin.sendMessage(adminMessage);
+            }
+        }
+    }
+
+    private String displayName(org.bukkit.OfflinePlayer player) {
+        return player.getName() == null ? player.getUniqueId().toString() : player.getName();
+    }
+
     private boolean isSameBlock(Block block, Location location) {
         return location != null
             && block.getWorld().equals(location.getWorld())
             && block.getX() == location.getBlockX()
             && block.getY() == location.getBlockY()
             && block.getZ() == location.getBlockZ();
+    }
+
+    public record AntiCheatLogEntry(long createdAtMillis, String type, String details) {
     }
 }

@@ -39,6 +39,9 @@ public final class Lobbygames extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (cookieSpecialItemService != null) {
+            cookieSpecialItemService.stop();
+        }
         if (cookieClickerService != null) {
             cookieClickerService.stop();
         }

@@ -6,7 +6,6 @@ import org.bukkit.GameMode;
 import org.bukkit.Sound;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
-import org.bukkit.entity.Snowball;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -16,25 +15,21 @@ import org.bukkit.event.block.BlockExplodeEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.BlockPistonExtendEvent;
 import org.bukkit.event.block.BlockPistonRetractEvent;
-import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.ProjectileHitEvent;
-import org.bukkit.event.entity.ProjectileLaunchEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
-import org.bukkit.persistence.PersistentDataType;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
 
 public final class CookieListener implements Listener {
     private final CookieClickerService service;
     private final CookieSpecialItemService specialItemService;
-    private final Map<UUID, String> pendingSpecialProjectiles = new HashMap<>();
 
     public CookieListener(CookieClickerService service, CookieSpecialItemService specialItemService) {
         this.service = service;
@@ -51,19 +46,28 @@ public final class CookieListener implements Listener {
             event.setCancelled(true);
             Block target = event.getClickedBlock().getRelative(event.getBlockFace());
             specialItemService.detonateCookieTnt(target.getLocation());
-            consumeOneSpecialTnt(event.getPlayer());
+            consumeOneSpecialItem(event.getPlayer());
             return;
         }
 
-        if ((event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK) && specialItemService.isCookieRain(event.getItem())) {
+        if ((event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK)
+            && specialItemService.isColorSnowball(event.getItem())) {
             event.setCancelled(true);
-            specialItemService.startCookieRain(event.getPlayer());
-            consumeOneItem(event.getPlayer());
+            specialItemService.throwColorSnowball(event.getPlayer());
+            consumeOneSpecialItem(event.getPlayer());
             return;
         }
 
-        if ((event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK) && specialItemService.isColorSnowball(event.getItem())) {
-            pendingSpecialProjectiles.put(event.getPlayer().getUniqueId(), CookieSpecialItemService.COLOR_SNOWBALL_ID);
+        if ((event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK)
+            && specialItemService.isCookieRain(event.getItem())) {
+            event.setCancelled(true);
+            if (!specialItemService.throwCookieRain(event.getPlayer())) {
+                long remainingSeconds = (long) Math.ceil(specialItemService.getCookieRainCooldownRemainingMillis(event.getPlayer()) / 1000.0D);
+                event.getPlayer().sendActionBar(Component.text("Cookie-Regen Cooldown: noch " + remainingSeconds + "s", NamedTextColor.RED));
+                event.getPlayer().playSound(event.getPlayer().getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.6f, 0.8f);
+                return;
+            }
+            consumeOneSpecialItem(event.getPlayer());
             return;
         }
 
@@ -94,6 +98,12 @@ public final class CookieListener implements Listener {
         }
 
         if (event.getAction() == Action.LEFT_CLICK_BLOCK) {
+            Component blockReason = service.getCookieClickBlockReason(player);
+            if (blockReason != null) {
+                player.sendActionBar(blockReason);
+                player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 0.45f, 0.7f);
+                return;
+            }
             CookieClickResult result = service.click(player);
             Component message = Component.text("+" + service.format(result.earned()) + " Cookies", result.critical() ? NamedTextColor.LIGHT_PURPLE : NamedTextColor.GOLD)
                 .append(Component.text(" | Konto: " + service.format(result.total()), NamedTextColor.YELLOW));
@@ -164,11 +174,7 @@ public final class CookieListener implements Listener {
         player.openInventory(CookieShopMenu.create(service, player));
     }
 
-    private void consumeOneSpecialTnt(Player player) {
-        consumeOneItem(player);
-    }
-
-    private void consumeOneItem(Player player) {
+    private void consumeOneSpecialItem(Player player) {
         if (player.getGameMode() == GameMode.CREATIVE) {
             return;
         }
@@ -183,29 +189,49 @@ public final class CookieListener implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
-    public void onProjectileLaunch(ProjectileLaunchEvent event) {
-        if (!(event.getEntity() instanceof Snowball snowball) || !(snowball.getShooter() instanceof Player player)) {
+    public void onProjectileHit(ProjectileHitEvent event) {
+        boolean colorSnowball = specialItemService.isColorSnowballProjectile(event.getEntity());
+        boolean cookieRain = specialItemService.isCookieRainProjectile(event.getEntity());
+        if (!colorSnowball && !cookieRain) {
             return;
         }
 
-        String itemId = pendingSpecialProjectiles.remove(player.getUniqueId());
-        if (!CookieSpecialItemService.COLOR_SNOWBALL_ID.equals(itemId)) {
-            return;
+        org.bukkit.Location impactLocation;
+        if (event.getHitBlock() != null) {
+            impactLocation = event.getHitBlock().getLocation();
+            if (event.getHitBlockFace() != null) {
+                impactLocation = impactLocation.add(event.getHitBlockFace().getModX(), event.getHitBlockFace().getModY(), event.getHitBlockFace().getModZ());
+            }
+        } else if (event.getHitEntity() != null) {
+            impactLocation = event.getHitEntity().getLocation();
+        } else {
+            impactLocation = event.getEntity().getLocation();
         }
 
-        snowball.getPersistentDataContainer().set(specialItemService.specialItemKey(), PersistentDataType.STRING, CookieSpecialItemService.COLOR_SNOWBALL_ID);
+        if (colorSnowball) {
+            specialItemService.burstColorSnowball(impactLocation, service::isProtectedBlock);
+        } else {
+            specialItemService.startCookieRain(impactLocation);
+        }
+        event.getEntity().remove();
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
-    public void onProjectileHit(ProjectileHitEvent event) {
-        if (!(event.getEntity() instanceof Snowball snowball)) {
-            return;
+    public void onEntityDamageByEntity(EntityDamageByEntityEvent event) {
+        if (specialItemService.isColorSnowballProjectile(event.getDamager())
+            || specialItemService.isCookieRainProjectile(event.getDamager())) {
+            event.setCancelled(true);
+            event.setDamage(0.0D);
         }
-        String itemId = snowball.getPersistentDataContainer().get(specialItemService.specialItemKey(), PersistentDataType.STRING);
-        if (!CookieSpecialItemService.COLOR_SNOWBALL_ID.equals(itemId)) {
-            return;
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onEntityDamage(EntityDamageEvent event) {
+        if (event.getCause() == EntityDamageEvent.DamageCause.FALL
+            && specialItemService.shouldCancelSpecialFallDamage(event.getEntity())) {
+            event.setCancelled(true);
+            event.setDamage(0.0D);
         }
-        specialItemService.detonateColorSnowball(snowball.getLocation(), service::isProtectedBlock);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
@@ -217,6 +243,12 @@ public final class CookieListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onBlockBreak(BlockBreakEvent event) {
+        if (specialItemService.isTemporarilyColored(event.getBlock())) {
+            event.setCancelled(true);
+            event.getPlayer().sendMessage(Component.text("Dieser Effekt-Block wird gleich automatisch zurueckgesetzt.", NamedTextColor.RED));
+            return;
+        }
+
         if (service.isProtectedBlock(event.getBlock())) {
             event.setCancelled(true);
             event.getPlayer().sendMessage(Component.text("Dieser CookieClicker-Block ist geschuetzt.", NamedTextColor.RED));
@@ -229,45 +261,50 @@ public final class CookieListener implements Listener {
             return;
         }
 
-        event.setCancelled(false);
-        event.setBuild(true);
-        event.getBlockPlaced().setType(org.bukkit.Material.AIR, false);
+        event.setCancelled(true);
+        event.setBuild(false);
         specialItemService.detonateCookieTnt(event.getBlockPlaced().getLocation());
+        consumeOneSpecialItem(event.getPlayer());
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onEntityExplode(EntityExplodeEvent event) {
-        event.blockList().removeIf(service::isProtectedBlock);
+        event.blockList().removeIf(block -> service.isProtectedBlock(block) || specialItemService.isTemporarilyColored(block));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onBlockExplode(BlockExplodeEvent event) {
-        event.blockList().removeIf(service::isProtectedBlock);
+        event.blockList().removeIf(block -> service.isProtectedBlock(block) || specialItemService.isTemporarilyColored(block));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPistonExtend(BlockPistonExtendEvent event) {
-        if (event.getBlocks().stream().anyMatch(service::isProtectedBlock)) {
+        if (event.getBlocks().stream().anyMatch(service::isProtectedBlock) || specialItemService.containsTemporarilyColoredBlock(event.getBlocks())) {
             event.setCancelled(true);
         }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPistonRetract(BlockPistonRetractEvent event) {
-        if (event.getBlocks().stream().anyMatch(service::isProtectedBlock)) {
+        if (event.getBlocks().stream().anyMatch(service::isProtectedBlock) || specialItemService.containsTemporarilyColoredBlock(event.getBlocks())) {
             event.setCancelled(true);
         }
     }
 
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
+        service.registerPlayerActivity(event.getPlayer());
         service.hideOtherHolograms(event.getPlayer());
         service.spawnPlayerHologram(event.getPlayer());
     }
 
+    @EventHandler(ignoreCancelled = true)
+    public void onPlayerMove(PlayerMoveEvent event) {
+        service.handlePlayerMove(event.getPlayer(), event.getFrom(), event.getTo());
+    }
+
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
-        pendingSpecialProjectiles.remove(event.getPlayer().getUniqueId());
-        service.removePlayerHologram(event.getPlayer());
+        service.forgetPlayer(event.getPlayer());
     }
 }
