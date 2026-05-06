@@ -38,6 +38,8 @@ public final class CookieClickerService {
     public static final String GUI_TITLE = "Cookie Upgrades";
     public static final long MAX_COOKIES = 9_000_000_000_000_000L;
     public static final long SPECIAL_TNT_COST = 10_000_000L;
+    public static final long COOKIE_RAIN_COST = 5_000_000L;
+    public static final long COLOR_SNOWBALL_COST = 5_000_000L;
     private static final long RESET_INTERVAL_MILLIS = 3L * 24L * 60L * 60L * 1000L;
     private static final LocalTime RESET_TIME = LocalTime.of(20, 0);
     private static final String HOLOGRAM_TAG = "lobbygames_cookie_clicker_hologram";
@@ -155,11 +157,23 @@ public final class CookieClickerService {
     }
 
     public boolean buySpecialTnt(org.bukkit.entity.Player player) {
+        return buySpecialItem(player, SPECIAL_TNT_COST);
+    }
+
+    public boolean buyCookieRain(org.bukkit.entity.Player player) {
+        return buySpecialItem(player, COOKIE_RAIN_COST);
+    }
+
+    public boolean buyColorSnowball(org.bukkit.entity.Player player) {
+        return buySpecialItem(player, COLOR_SNOWBALL_COST);
+    }
+
+    private boolean buySpecialItem(org.bukkit.entity.Player player, long cost) {
         CookieAccount account = storage.getAccount(player);
-        if (account.cookies() < SPECIAL_TNT_COST) {
+        if (account.cookies() < cost) {
             return false;
         }
-        storage.addCookies(player, -SPECIAL_TNT_COST);
+        storage.addCookies(player, -cost);
         updateHologramText();
         updateLeaderboard();
         return true;
@@ -414,7 +428,17 @@ public final class CookieClickerService {
     }
 
     private void tickAutoClickers() {
-        if (storage.addAutoClickerCookies() > 0) {
+        boolean changed = false;
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            CookieAccount account = storage.getAccount(player);
+            long cookiesPerSecond = account.cookiesPerSecond();
+            if (cookiesPerSecond <= 0) {
+                continue;
+            }
+            storage.addCookies(player, cookiesPerSecond);
+            changed = true;
+        }
+        if (changed) {
             updateHologramText();
         }
     }

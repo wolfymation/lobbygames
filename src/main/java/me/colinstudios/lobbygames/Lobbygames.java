@@ -42,6 +42,9 @@ public final class Lobbygames extends JavaPlugin {
         if (cookieClickerService != null) {
             cookieClickerService.stop();
         }
+        if (cookieSpecialItemService != null) {
+            cookieSpecialItemService.restoreTemporaryBlocks();
+        }
         if (cookieStorage != null) {
             cookieStorage.close();
         }

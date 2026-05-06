@@ -14,14 +14,18 @@ import java.util.List;
 
 public final class CookieShopMenu {
     public static final String TITLE = "Cookie Shop";
-    public static final int SPECIAL_TNT_SLOT = 13;
+    public static final int SPECIAL_TNT_SLOT = 11;
+    public static final int COOKIE_RAIN_SLOT = 13;
+    public static final int COLOR_SNOWBALL_SLOT = 15;
 
     private CookieShopMenu() {
     }
 
     public static Inventory create(CookieClickerService service, Player player) {
         CookieAccount account = service.getAccount(player);
-        boolean affordable = account.cookies() >= CookieClickerService.SPECIAL_TNT_COST;
+        boolean tntAffordable = account.cookies() >= CookieClickerService.SPECIAL_TNT_COST;
+        boolean rainAffordable = account.cookies() >= CookieClickerService.COOKIE_RAIN_COST;
+        boolean snowballAffordable = account.cookies() >= CookieClickerService.COLOR_SNOWBALL_COST;
         CookieShopMenuHolder holder = new CookieShopMenuHolder();
         Inventory inventory = org.bukkit.Bukkit.createInventory(holder, 27, Component.text(TITLE, NamedTextColor.GOLD));
         holder.setInventory(inventory);
@@ -35,13 +39,39 @@ public final class CookieShopMenu {
             Material.TNT,
             "Special TNT",
             List.of(
-                line("Kosten: ", service.format(CookieClickerService.SPECIAL_TNT_COST) + " Cookies", affordable ? NamedTextColor.GREEN : NamedTextColor.RED),
+                line("Kosten: ", service.format(CookieClickerService.SPECIAL_TNT_COST) + " Cookies", tntAffordable ? NamedTextColor.GREEN : NamedTextColor.RED),
                 Component.text("Explodiert ohne Blockschaden.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
                 Component.text("Schleudert Spieler weg.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
                 Component.empty(),
-                Component.text(affordable ? "Bereit zum Kaufen" : "Nicht genug Cookies", affordable ? NamedTextColor.GREEN : NamedTextColor.RED).decoration(TextDecoration.ITALIC, false)
+                Component.text(tntAffordable ? "Bereit zum Kaufen" : "Nicht genug Cookies", tntAffordable ? NamedTextColor.GREEN : NamedTextColor.RED).decoration(TextDecoration.ITALIC, false)
             ),
-            affordable
+            tntAffordable
+        ));
+
+        inventory.setItem(COOKIE_RAIN_SLOT, item(
+            Material.COOKIE,
+            "Cookie Regen",
+            List.of(
+                line("Kosten: ", service.format(CookieClickerService.COOKIE_RAIN_COST) + " Cookies", rainAffordable ? NamedTextColor.GREEN : NamedTextColor.RED),
+                Component.text("Laesst Cookies um dich regnen.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                Component.text("Kosmetischer Effekt ohne Exploit-Gewinn.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                Component.empty(),
+                Component.text(rainAffordable ? "Bereit zum Kaufen" : "Nicht genug Cookies", rainAffordable ? NamedTextColor.GREEN : NamedTextColor.RED).decoration(TextDecoration.ITALIC, false)
+            ),
+            rainAffordable
+        ));
+
+        inventory.setItem(COLOR_SNOWBALL_SLOT, item(
+            Material.SNOWBALL,
+            "Farb-Schneeball",
+            List.of(
+                line("Kosten: ", service.format(CookieClickerService.COLOR_SNOWBALL_COST) + " Cookies", snowballAffordable ? NamedTextColor.GREEN : NamedTextColor.RED),
+                Component.text("Faerbt Bloecke im Radius 10 temporaer.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                Component.text("Container, Heads und Schutzbloecke bleiben sicher.", NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false),
+                Component.empty(),
+                Component.text(snowballAffordable ? "Bereit zum Kaufen" : "Nicht genug Cookies", snowballAffordable ? NamedTextColor.GREEN : NamedTextColor.RED).decoration(TextDecoration.ITALIC, false)
+            ),
+            snowballAffordable
         ));
 
         return inventory;

@@ -223,7 +223,7 @@ public final class CookieAdminCommand implements CommandExecutor, TabCompleter {
 
         org.bukkit.inventory.ItemStack item = specialItemService.createSpecialItem(args[2]);
         if (item == null) {
-            sender.sendMessage(Component.text("Unbekanntes SpecialItem. Verfuegbar: tnt"));
+            sender.sendMessage(Component.text("Unbekanntes SpecialItem. Verfuegbar: tnt, cookieregen, farbschneeball"));
             return;
         }
 
@@ -320,7 +320,7 @@ public final class CookieAdminCommand implements CommandExecutor, TabCompleter {
             return filter(Arrays.stream(Bukkit.getOfflinePlayers()).map(OfflinePlayer::getName).toList(), args[2]);
         }
         if (args.length == 3 && args[1].equalsIgnoreCase("specialitem")) {
-            return filter(List.of("tnt"), args[2]);
+            return filter(List.of("tnt", "cookieregen", "farbschneeball"), args[2]);
         }
         if (args.length == 4 && args[1].equalsIgnoreCase("specialitem")) {
             return filter(Bukkit.getOnlinePlayers().stream().map(Player::getName).toList(), args[3]);
